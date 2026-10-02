@@ -2,6 +2,8 @@
 
 把《无职转生》希露菲叶特立绘做成 WorkBuddy 桌面皮肤：主界面、侧边栏、顶部菜单栏、输入框、「新建任务」首页全部透出底图，并支持自定义槽位与「打开即带皮肤」。
 
+> 引擎、主题、一键脚本全部随仓库分发。clone 下来按「安装与使用」三步即可在自己电脑上跑起来，零 npm 依赖。
+
 > 完成时间：2026-10-02　|　环境：WorkBuddy 5.6.2 / Windows　|　主题 ID：`sylphiette-91f4818e`
 
 ## 最终效果
@@ -63,12 +65,33 @@ WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网�
 
 调整经验：一次只能小步走（±5~8%）。曾一次性下调 20%，视觉效果直接变成「全透白」，只能回退重来。
 
-## 使用方法
+## 安装与使用
 
-1. **首次启用**：双击「启用自动皮肤.cmd」，执行一次即可。之后正常打开 WorkBuddy 就会自动带皮肤，无需再操作。
-2. **手动换肤**：「apply-skin(一键换肤).cmd」——会重启 WorkBuddy 并注入。
-3. **还原官方外观**：「apply-skin(一键还原).cmd」，或「停用自动皮肤.cmd」彻底关闭自动皮肤。
-4. **日常微调**：点界面右上角 🎨 按钮，可换图、调薄纱浓度、调背景取景。
+前置条件：Windows + 已安装 WorkBuddy；Node 18+（WorkBuddy 自带的 Node 即可，没有就装一个系统 Node）。
+
+1. **获取本仓库**：网页绿色 Code 按钮 → Download ZIP，或
+
+   ```bash
+   git clone https://github.com/hgfmy/workbuddy-sylphiette-skin.git
+   ```
+
+2. **安装引擎**：把 `engine/` 整个文件夹复制到：
+
+   ```
+   %USERPROFILE%\.workbuddy\skills\workbuddy-skin-studio
+   ```
+
+   复制完成后，该目录下应能直接看到 `src`、`scripts`、`themes`、`package.json`。希露菲主题随 `engine/themes/` 一起装好，不需要单独操作。
+
+3. **配置一键脚本**：`scripts/` 下的 4 个 `.cmd` 顶部各有一个变量块，按你的环境核对：
+
+   - `NODE` —— WorkBuddy 内置 node.exe（形如 `%USERPROFILE%\.workbuddy\binaries\node\versions\<版本号>\node.exe`，版本号以你机器实际为准）
+   - `ROOT` —— 第 2 步的安装目录
+   - `EXE` —— WorkBuddy 主程序路径（仅还原脚本用到）
+
+4. **应用皮肤**：双击 `scripts/apply-skin.cmd`，WorkBuddy 会以调试模式重启并注入皮肤（约 20-40 秒）。想要「以后每次打开自动带皮肤」，双击 `scripts/enable-auto-skin.cmd` 装一次常驻守护进程即可。
+
+5. **日常调整**：点 WorkBuddy 右上角 🎨，可换自定义图片、调薄纱浓度、调背景取景；想回到官方外观用 `scripts/revert-skin.cmd`。
 
 ## 踩坑记录
 
@@ -80,9 +103,11 @@ WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网�
 
 ## 交付物
 
-- `images/hero.webp` —— 增强版底图
-- `scripts/` —— 4 个一键脚本
-- 本说明文档，含 4 张效果图
+- `engine/` —— 完整可运行的皮肤引擎：CDP 注入、薄纱/取景预设、主题管理、常驻守护进程，零 npm 依赖（Node 18+ 原生模块）
+- `engine/themes/sylphiette-91f4818e/` —— 希露菲主题（theme.json + 增强底图），随引擎一起安装
+- `images/` —— 4 张效果图素材
+- `scripts/` —— 4 个一键脚本（Windows .cmd）
+- 本说明文档
 
 ### 脚本对照
 

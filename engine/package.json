@@ -1,0 +1,20 @@
+{
+  "name": "workbuddy-skin-studio",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "workbuddy-skin": "src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "doctor": "node src/cli.mjs doctor",
+    "status": "node src/cli.mjs status",
+    "list": "node src/cli.mjs list",
+    "apply": "node src/cli.mjs apply",
+    "skin": "node scripts/apply.mjs",
+    "skin:apply": "node scripts/apply.mjs",
+    "skin:pause": "node scripts/pause.mjs",
+    "skin:find": "node scripts/find-workbuddy.mjs"
+  }
+}

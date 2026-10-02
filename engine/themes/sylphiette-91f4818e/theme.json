@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "sylphiette-91f4818e",
+  "name": "希露菲 Sylphiette",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#C1708C",
+    "secondary": "#E3A9BE",
+    "surface": "#FBF9FA",
+    "text": "#3A2F36"
+  },
+  "copy": null
+}
