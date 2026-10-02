@@ -295,24 +295,30 @@ async function tick() {
     return 1200;
   }
 
-  const graceMs = appearedHasFlag ? GRACE_STARTING_MS : GRACE_NO_PORT_MS;
-  if (Date.now() - appearedAt < graceMs) return 1200;
+  if (!appearedHasFlag) {
+    // 无端口启动：永远等不到 CDP，宽限后带端口重启
+    if (Date.now() - appearedAt < GRACE_NO_PORT_MS) return 1200;
 
-  if (relaunches >= MAX_RELAUNCH) {
-    if (relaunches === MAX_RELAUNCH) {
-      log(`重启次数已达上限 ${MAX_RELAUNCH}，停止自动重启（可双击启用脚本重新开始）`);
-      relaunches += 1;
+    if (relaunches >= MAX_RELAUNCH) {
+      if (relaunches === MAX_RELAUNCH) {
+        log(`重启次数已达上限 ${MAX_RELAUNCH}，停止自动重启（可双击启用脚本重新开始）`);
+        relaunches += 1;
+      }
+      return 60000;
     }
-    return 60000;
-  }
-  if (Date.now() - lastRelaunchAt < COOLDOWN_MS) return 10000;
+    if (Date.now() - lastRelaunchAt < COOLDOWN_MS) return 10000;
 
-  relaunches += 1;
-  lastRelaunchAt = Date.now();
-  const ok = await runApply(`以调试模式重启 WorkBuddy（第 ${relaunches}/${MAX_RELAUNCH} 次）`);
-  appearedAt = 0;
-  appearedHasFlag = false;
-  return ok ? 2000 : 15000;
+    relaunches += 1;
+    lastRelaunchAt = Date.now();
+    const ok = await runApply(`以调试模式重启 WorkBuddy（第 ${relaunches}/${MAX_RELAUNCH} 次）`);
+    appearedAt = 0;
+    appearedHasFlag = false;
+    return ok ? 2000 : 15000;
+  }
+
+  // 带端口启动：CDP 就绪时间取决于应用自身（冷启动可能远超 45s），
+  // 重启它不会更快反而打断使用——无限等待，每 2s 复查。
+  return 2000;
 }
 
 async function main() {
