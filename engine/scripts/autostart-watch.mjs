@@ -12,8 +12,9 @@
 //       轮询只作为低频安全网保留。
 //
 // 仍然刻意不做的事：
-//   - 不主动启动 WorkBuddy
-//   - 不打断「守护进程启动之前就已经开着的」会话（那种情况下只等下一次启动生效）
+//   - 不主动启动 WorkBuddy（只在它没带调试端口时才重启它）
+//   - 「不打断既有会话」的绝对保护已移除：实测它会死锁（守护启动后
+//     用户新开的无端口实例永远不被接管，皮肤回不来），改由宽限期 + 重启上限兜底
 //
 // 由 Startup 文件夹里的 wb-skin-autostart.vbs 以隐藏窗口启动，退出方式：
 //   双击「停用自动皮肤.cmd」→ 写一个 stop 标记，本进程下一轮自行退出。
@@ -66,7 +67,7 @@ const GRACE_STARTING_MS = Math.max(10, Number(cfg.graceStartingSeconds) || DEFAU
 const COOLDOWN_MS = Math.max(30, Number(cfg.relaunchCooldownSeconds) || DEFAULTS.relaunchCooldownSeconds) * 1000;
 const MAX_RELAUNCH = Math.max(1, Number(cfg.maxRelaunchPerSession) || DEFAULTS.maxRelaunchPerSession);
 
-try { mkdirSync(stateRoot, { recursive: true }); } catch {}
+  try { mkdirSync(stateRoot, { recursive: true }); } catch {}
 
 function log(message) {
   const line = `[${new Date().toISOString()}] ${message}\n`;
@@ -219,8 +220,9 @@ async function buildDaemonScript() {
 let fast = null;          // fast-attach 通道
 let skinScript = null;    // document-start 包装后的注入脚本（null = 构建失败，退回 v1 路线）
 
-// 守护启动时就已经在跑的实例：不打断它，只等下一次启动
-let preexisting = isRunning();
+// 注：不再做「不打断既有会话」的绝对保护——实测它会形成死锁（守护启动后
+// 用户新开的无端口实例永远不被接管，皮肤永远回不来）。改由宽限期 + 重启上限兜底：
+// 无端口实例宽限 10s 后带端口重启，最多 4 次 + 180s 冷却。
 let appearedAt = 0;
 let appearedHasFlag = false;
 let relaunches = 0;
@@ -235,8 +237,6 @@ async function tick() {
 
   const running = isRunning();
   if (!running) {
-    if (preexisting) log("WorkBuddy 已退出，解除「不打断既有会话」的保护");
-    preexisting = false;
     appearedAt = 0;
     appearedHasFlag = false;
     relaunches = 0;
@@ -286,8 +286,6 @@ async function tick() {
   lastReported = false;
   if (fast) { fast.stop(); fast = null; }
 
-  if (preexisting) return 8000;
-
   if (appearedAt === 0) {
     appearedAt = Date.now();
     appearedHasFlag = hasDebugFlag();
@@ -320,8 +318,8 @@ async function tick() {
 async function main() {
   if (!acquireLock()) process.exit(0);
   log(`守护进程启动 pid=${process.pid} theme=${cfg.theme} port=${PORT} grace=${GRACE_NO_PORT_MS / 1000}s/${GRACE_STARTING_MS / 1000}s mode=v2-fast-attach`);
-  log(preexisting
-    ? "启动时 WorkBuddy 已在运行：本次只做注入/自愈，不主动重启它"
+  log(isRunning()
+    ? "启动时 WorkBuddy 已在运行：先尝试注入；若它没带调试端口，宽限后将带端口重启一次"
     : "启动时 WorkBuddy 未运行：等待它被打开");
 
   try {
@@ -343,6 +341,7 @@ async function main() {
   process.on("exit", () => { fast?.stop(); releaseLock(); });
   process.on("SIGINT", () => { fast?.stop(); releaseLock(); process.exit(0); });
 
+  loop:
   for (;;) {
     let waitMs = 8000;
     try {
@@ -352,7 +351,15 @@ async function main() {
       waitMs = 10000;
     }
     if (waitMs < 0) break;
-    await sleep(waitMs);
+    // 分片睡眠：停用标记最迟 2 秒内响应。
+    // 安装脚本等旧守护退出只给 15 秒，整段长睡眠会让「启用」流程超时失败。
+    let remaining = waitMs;
+    while (remaining > 0) {
+      const slice = Math.min(2000, remaining);
+      await sleep(slice);
+      remaining -= slice;
+      if (existsSync(STOP_PATH)) continue loop;
+    }
   }
   fast?.stop();
   releaseLock();
