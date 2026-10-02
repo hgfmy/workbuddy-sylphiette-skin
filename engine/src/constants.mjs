@@ -5,7 +5,7 @@ export const PRODUCT_ID = "workbuddy-skin-studio";
 export const PRODUCT_NAME = "WorkBuddy Skin Studio";
 export const STATE_SCHEMA_VERSION = 1;
 export const THEME_SCHEMA_VERSION = 1;
-export const DEFAULT_THEME_ID = "miku-light";
+export const DEFAULT_THEME_ID = "sylphiette-91f4818e";
 export const DEFAULT_CDP_PORT = 9223;
 export const EXPECTED_BUNDLE_ID = "com.workbuddy.workbuddy";
 
