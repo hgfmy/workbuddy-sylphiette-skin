@@ -38,9 +38,9 @@ async function themeEntry(loadedTheme) {
   };
 }
 
-export async function applySkin({ loadedTheme, themes, port, deps = {} }) {
-  const wait = deps.waitForRendererTargets ?? waitForRendererTargets;
-  const Session = deps.Session ?? CdpSession;
+// 只构建注入脚本（不执行），供 applySkin 与 fast-attach 守护通道共用
+// defer=true 时返回函数表达式（供 document-start 引导包装），否则返回立即执行表达式
+export async function buildSkinScript({ loadedTheme, themes, defer = false }) {
   const menuThemes = themes?.length ? themes : [loadedTheme];
   const entries = [];
   for (const theme of menuThemes) entries.push(await themeEntry(theme));
@@ -73,13 +73,21 @@ export async function applySkin({ loadedTheme, themes, port, deps = {} }) {
     cssTemplate,
     veils,
     framings,
+    defer,
   });
+  return { expression, themeId, menuIds: entries.map(({ id }) => id) };
+}
+
+export async function applySkin({ loadedTheme, themes, port, deps = {} }) {
+  const wait = deps.waitForRendererTargets ?? waitForRendererTargets;
+  const Session = deps.Session ?? CdpSession;
+  const { expression, themeId, menuIds } = await buildSkinScript({ loadedTheme, themes });
   const targets = await wait(port, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,
     pollMs: deps.pollMs ?? 500,
   });
   const values = await evaluateTargets(targets, expression, Session);
-  return { applied: values.length, themeId, menuThemes: entries.map(({ id }) => id), targets: targets.map(({ id }) => id) };
+  return { applied: values.length, themeId, menuThemes: menuIds, targets: targets.map(({ id }) => id) };
 }
 
 export async function removeSkin({ port, deps = {} }) {

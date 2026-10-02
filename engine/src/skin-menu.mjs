@@ -20,6 +20,9 @@ export function buildSkinMenuScript({
   cssTemplate = "",
   veils = [],
   framings = [],
+  // true  → 返回「函数表达式」(() => {...})，由调用方决定何时执行（document-start 引导用）
+  // false → 返回「立即执行」的表达式 (() => {...})()，供 Runtime.evaluate 直接跑
+  defer = false,
 }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
@@ -61,9 +64,8 @@ export function buildSkinMenuScript({
     activeKey: "workbuddySkinActive",
   });
 
-  return `(() => {
+  const source = `(() => {
   const data = ${payload};
-
   let style = document.getElementById(data.styleId);
   if (!style) {
     style = document.createElement("style");
@@ -580,4 +582,6 @@ export function buildSkinMenuScript({
   };
   return true;
 })()`;
+  // defer 模式：去掉末尾的调用括号 "()"，得到可赋值/可延后执行的函数表达式
+  return defer ? source.slice(0, -2) : source;
 }

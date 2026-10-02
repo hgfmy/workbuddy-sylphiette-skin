@@ -1,18 +1,19 @@
 #!/usr/bin/env node
-// WorkBuddy Skin Studio - 常驻守护进程（Windows）
+// WorkBuddy Skin Studio - 常驻守护进程（Windows）v2：事件驱动、秒级注入
 //
 // 目标：只要你打开 WorkBuddy，皮肤就已经在位，不需要手动做任何事。
 //
-// 它做什么：
-//   1. CDP 调试端口在，但皮肤不在位 → 立刻重新注入
-//      （顺便自愈：渲染进程刷新 / 崩溃恢复后样式丢了，也会自动补回来）
-//   2. WorkBuddy 在跑但没有调试端口（即用普通方式启动的）→ 等一个宽限期后
-//      带 --remote-debugging-port 重启一次，再注入
-//   3. WorkBuddy 没在跑 → 待机，什么都不做
+// v2 与 v1 的区别：
+//   v1：每 8 秒轮询一次皮肤状态，丢了就 spawn 一个 apply 子进程补——
+//       从界面出现/刷新到皮肤上屏普遍 3~12 秒，且刷新瞬间必然「白屏闪一下」。
+//   v2：通过 fast-attach 常连 CDP 浏览器通道，用 Page.addScriptToEvaluateOnNewDocument
+//       把皮肤脚本注册成「新文档起始脚本」——每个新文档（首次启动、刷新、新窗口）
+//       都在 first paint 之前执行皮肤脚本，肉眼等同秒上。
+//       轮询只作为低频安全网保留。
 //
-// 它刻意不做什么：
-//   - 不会主动启动 WorkBuddy
-//   - 不会打断「守护进程启动之前就已经开着的」会话（那种情况下只等下一次启动生效）
+// 仍然刻意不做的事：
+//   - 不主动启动 WorkBuddy
+//   - 不打断「守护进程启动之前就已经开着的」会话（那种情况下只等下一次启动生效）
 //
 // 由 Startup 文件夹里的 wb-skin-autostart.vbs 以隐藏窗口启动，退出方式：
 //   双击「停用自动皮肤.cmd」→ 写一个 stop 标记，本进程下一轮自行退出。
@@ -24,7 +25,10 @@ import { fileURLToPath } from "node:url";
 
 import { cdpReady } from "./apply.mjs";
 import { resolveStudioPaths } from "../src/constants.mjs";
-import { skinStatus } from "../src/injector.mjs";
+import { buildSkinScript, skinStatus } from "../src/injector.mjs";
+import { startFastAttach } from "../src/fast-attach.mjs";
+import { loadTheme } from "../src/theme-schema.mjs";
+import { listThemes } from "../src/theme-store.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const paths = resolveStudioPaths();
@@ -171,6 +175,50 @@ function runApply(reason) {
   });
 }
 
+// ---- v2：document-start 引导包装 ----
+// 内层脚本是函数表达式（defer 模式），首次执行时 document.head 可能还是 null
+// （document-start 阶段），所以包一层：head+body 就绪前用 16ms 轮询 + DOMContentLoaded 兜底。
+function wrapForDocumentStart(fnExpression) {
+  return `(function(){
+  var boot = ${fnExpression};
+  if (document.head && document.body) { boot(); return; }
+  var timer = setInterval(function(){
+    if (document.head && document.body) { clearInterval(timer); boot(); }
+  }, 16);
+  document.addEventListener("DOMContentLoaded", function(){
+    clearInterval(timer);
+    if (document.head && document.body) boot();
+  }, { once: true });
+})();`;
+}
+
+// 启动时把注入脚本一次性构建好（主题文件读取 + base64 都在进程内完成）
+async function buildDaemonScript() {
+  const roots = [join(root, "themes"), paths.userThemesRoot];
+  const themes = await listThemes({ roots });
+  const selected = themes.find((theme) => theme.id === cfg.theme);
+  if (!selected) throw new Error(`找不到主题：${cfg.theme}`);
+  const loadedTheme = await loadTheme(selected.path);
+  const menuThemes = [];
+  for (const theme of themes) {
+    if (theme.id === cfg.theme) {
+      menuThemes.push(loadedTheme);
+      continue;
+    }
+    try {
+      menuThemes.push(await loadTheme(theme.path));
+    } catch {
+      // 坏主题不阻塞守护，只是不进菜单
+    }
+  }
+  const { expression } = await buildSkinScript({ loadedTheme, themes: menuThemes, defer: true });
+  return wrapForDocumentStart(expression);
+}
+
+// ---- 状态 ----
+let fast = null;          // fast-attach 通道
+let skinScript = null;    // document-start 包装后的注入脚本（null = 构建失败，退回 v1 路线）
+
 // 守护启动时就已经在跑的实例：不打断它，只等下一次启动
 let preexisting = isRunning();
 let appearedAt = 0;
@@ -193,30 +241,50 @@ async function tick() {
     appearedHasFlag = false;
     relaunches = 0;
     lastReported = null;
-    return 8000;
+    if (fast) { fast.stop(); fast = null; }
+    return 2500;
   }
 
   const cdp = await cdpReady(PORT);
   if (cdp) {
     appearedAt = 0;
+
+    // v2 主通道：还没建立就立即建立（fast-attach 连上后对既有目标立即注入）
+    if (skinScript && !fast) {
+      fast = startFastAttach({ port: PORT, script: skinScript, log });
+      lastReported = null;
+      return 2500;
+    }
+
     if (busy) return 3000;
+
+    // 安全网：确认皮肤真的在位（fast-attach 正常时这一步几乎总是 true）
     const status = await skinStatus({ port: PORT }).catch(() => null);
     const targets = Array.isArray(status) ? status : [];
     const ok = targets.length > 0 && targets.every((target) => target && target.installed && target.menu);
     if (ok !== lastReported) {
-      log(ok ? "皮肤在位" : `皮肤缺失（${targets.length} 个渲染目标）→ 重新注入`);
+      log(ok ? "皮肤在位" : `皮肤缺失（${targets.length} 个渲染目标）→ 立即补注`);
       lastReported = ok;
     }
     if (!ok) {
-      const applied = await runApply("皮肤缺失，重新注入");
+      if (fast && fast.sessionCount > 0) {
+        const done = await fast.reapply().catch(() => 0);
+        if (done > 0) {
+          log(`fast-attach 补注完成（${done} 个目标）`);
+          return 4000;
+        }
+      }
+      // 通道不可用或补注失败 → 退回 v1 子进程路线
+      const applied = await runApply("fast-attach 不可用，走子进程注入");
       lastReported = applied ? true : null;
       return 2000;
     }
-    return 8000;
+    return 12000;
   }
 
   // WorkBuddy 在跑但调试端口没开
   lastReported = false;
+  if (fast) { fast.stop(); fast = null; }
 
   if (preexisting) return 8000;
 
@@ -226,11 +294,11 @@ async function tick() {
     log(appearedHasFlag
       ? "WorkBuddy 正在启动（命令带调试端口），等待 CDP 就绪"
       : "检测到 WorkBuddy 启动（命令不带调试端口），宽限后将以调试模式重启它");
-    return 3000;
+    return 1200;
   }
 
   const graceMs = appearedHasFlag ? GRACE_STARTING_MS : GRACE_NO_PORT_MS;
-  if (Date.now() - appearedAt < graceMs) return 3000;
+  if (Date.now() - appearedAt < graceMs) return 1200;
 
   if (relaunches >= MAX_RELAUNCH) {
     if (relaunches === MAX_RELAUNCH) {
@@ -246,25 +314,34 @@ async function tick() {
   const ok = await runApply(`以调试模式重启 WorkBuddy（第 ${relaunches}/${MAX_RELAUNCH} 次）`);
   appearedAt = 0;
   appearedHasFlag = false;
-  return ok ? 4000 : 15000;
+  return ok ? 2000 : 15000;
 }
 
 async function main() {
   if (!acquireLock()) process.exit(0);
-  log(`守护进程启动 pid=${process.pid} theme=${cfg.theme} port=${PORT} grace=${GRACE_NO_PORT_MS / 1000}s/${GRACE_STARTING_MS / 1000}s`);
+  log(`守护进程启动 pid=${process.pid} theme=${cfg.theme} port=${PORT} grace=${GRACE_NO_PORT_MS / 1000}s/${GRACE_STARTING_MS / 1000}s mode=v2-fast-attach`);
   log(preexisting
     ? "启动时 WorkBuddy 已在运行：本次只做注入/自愈，不主动重启它"
     : "启动时 WorkBuddy 未运行：等待它被打开");
 
-  // --once：只跑一轮就退出，用于诊断
-  if (process.argv.includes("--once")) {
-    const next = await tick();
-    releaseLock();
-    process.exit(next < 0 ? 0 : 0);
+  try {
+    skinScript = await buildDaemonScript();
+    log(`注入脚本构建完成（${Math.round(skinScript.length / 1024)} KB）`);
+  } catch (error) {
+    log(`注入脚本构建失败，退回 v1 子进程路线: ${error?.message ?? error}`);
+    skinScript = null;
   }
 
-  process.on("exit", releaseLock);
-  process.on("SIGINT", () => { releaseLock(); process.exit(0); });
+  // --once：只跑一轮就退出，用于诊断
+  if (process.argv.includes("--once")) {
+    await tick();
+    fast?.stop();
+    releaseLock();
+    process.exit(0);
+  }
+
+  process.on("exit", () => { fast?.stop(); releaseLock(); });
+  process.on("SIGINT", () => { fast?.stop(); releaseLock(); process.exit(0); });
 
   for (;;) {
     let waitMs = 8000;
@@ -277,12 +354,14 @@ async function main() {
     if (waitMs < 0) break;
     await sleep(waitMs);
   }
+  fast?.stop();
   releaseLock();
   process.exit(0);
 }
 
 main().catch((error) => {
   log(`守护进程崩溃: ${error?.stack ?? error}`);
+  fast?.stop();
   releaseLock();
   process.exit(1);
 });
