@@ -55,7 +55,7 @@ export function buildSkinMenuScript({
     framings: normalizePresets(framings),
     sentinels: CSS_SENTINELS,
     customId: "custom-upload",
-    customSlots: 4,
+    customSlots: 10,
     storageVersion: 2,
     storageKey: "workbuddyCustomThemes",
     legacyStorageKey: "workbuddyCustomTheme",
@@ -95,6 +95,20 @@ export function buildSkinMenuScript({
   panel.style.cssText = "display:none;margin-top:8px;min-width:200px;max-width:264px;max-height:calc(100vh - 150px);overflow-y:auto;padding:6px;border-radius:12px;border:1px solid rgba(0,0,0,.1);background:rgba(255,255,255,.94);backdrop-filter:blur(16px);box-shadow:0 10px 30px rgba(0,0,0,.18);color:#17344f;";
 
   const rows = new Map();
+  // 面板内一次性提示（保存失败等），几秒后自动收走
+  let toastTimer = null;
+  const toast = (message) => {
+    let node = panel.querySelector("[data-skin-toast]");
+    if (!node) {
+      node = document.createElement("div");
+      node.dataset.skinToast = "1";
+      node.style.cssText = "margin:2px 4px 6px;padding:7px 9px;border-radius:8px;background:rgba(214,58,58,.12);color:#a32626;font-size:12px;line-height:1.45;white-space:normal;";
+      panel.insertBefore(node, panel.firstChild);
+    }
+    node.textContent = message;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { node.remove(); toastTimer = null; }, 7000);
+  };
   const paint = (id) => {
     for (const [rowId, row] of rows) {
       row.style.background = rowId === id ? "rgba(36,201,215,.16)" : "transparent";
@@ -229,9 +243,11 @@ export function buildSkinMenuScript({
   section("自定义", true);
 
   // ---- 自定义图片：本地选图 -> 压缩 -> 取色 -> 生成 CSS -> 持久化 ----
-  // 最多 data.customSlots 张（当前 3），每张各占菜单里的一行，可随时切换。
+  // 一共 data.customSlots 格，每格各占菜单里的一行，可随时切换。
   // 只有「当前正在用的那一张」会生成 CSS 塞进 <style>，其余只是 localStorage 里的一份
   // dataUrl，所以槽位数量不影响注入体积（CDP 消息不会因此变大）。
+  // 但槽位越多、localStorage 里共存的数据就越多，所以每格的存储预算按槽位数摊薄
+  // （见下面的 STORAGE_BUDGET_CHARS / encodeWithinBudget）。
   const customSlotId = (index) => data.customId + "-" + (index + 1);
 
   const buildCustomCss = (dataUrl, colors, id) => data.cssTemplate
@@ -278,9 +294,37 @@ export function buildSkinMenuScript({
     }
     return result;
   };
+  // 存储预算：Chromium 的 localStorage 配额约 5MB/源，槽位一多，base64 dataUrl 很容易顶到上限。
+  // 于是按槽位数摊薄——10 格约 420K 字符/格，4 格时约 1M 字符/格（老配置的行为不回归）。
+  const STORAGE_BUDGET_CHARS = 4200000;
+  const slotBudgetChars = Math.max(120000, Math.floor(STORAGE_BUDGET_CHARS / data.customSlots));
+
+  // 编码阶梯：从大而清往下退，取第一个塞得进预算的档位（图片再大也不会超编）。
+  // 只在图片确实超编时才会退档，正常情况下第一档就够，画质与旧版一致。
+  const ENCODE_LADDER = [[1600, 0.82], [1440, 0.8], [1280, 0.78], [1120, 0.74], [960, 0.7], [800, 0.66], [640, 0.62]];
+  const encodeWithinBudget = (img) => {
+    let fallback = null;
+    for (const [maxWidth, quality] of ENCODE_LADDER) {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      const encoded = { dataUrl: canvas.toDataURL("image/webp", quality), maxWidth, quality };
+      if (encoded.dataUrl.length <= slotBudgetChars) return encoded;
+      fallback = encoded;
+    }
+    return fallback;
+  };
+
   const saveCustoms = (list) => {
-    try { localStorage.setItem(data.storageKey, JSON.stringify({ v: data.storageVersion, slots: list })); }
-    catch (error) { console.warn("WorkBuddy Skin：自定义图片总体积超出 localStorage，本次生效但重启后不保留", error); }
+    try {
+      localStorage.setItem(data.storageKey, JSON.stringify({ v: data.storageVersion, slots: list }));
+      return true;
+    } catch (error) {
+      console.warn("WorkBuddy Skin：自定义图片总体积超出 localStorage 配额", error);
+      return false;
+    }
   };
 
   // 被用户从菜单里清掉的已装主题（可以随时恢复回来）
@@ -425,24 +469,25 @@ export function buildSkinMenuScript({
     const slot = Number.isInteger(index) && index >= 0 && index < data.customSlots ? index : 0;
     const img = new Image();
     img.onload = () => {
-      const scale = Math.min(1, 1600 / img.width);
-      const full = document.createElement("canvas");
-      full.width = Math.round(img.width * scale);
-      full.height = Math.round(img.height * scale);
-      full.getContext("2d").drawImage(img, 0, 0, full.width, full.height);
+      // 先按预算编码（普通图取第一档 1600/q0.82，与旧版画质一致；大图才会自动退档）
+      const encoded = encodeWithinBudget(img);
       const sample = document.createElement("canvas");
       sample.width = 48; sample.height = Math.max(1, Math.round(48 * img.height / img.width));
       sample.getContext("2d").drawImage(img, 0, 0, sample.width, sample.height);
       const theme = {
         name: name || "\\u6211\\u7684\\u56fe\\u7247 " + (slot + 1),
-        dataUrl: full.toDataURL("image/webp", 0.8),
+        dataUrl: encoded.dataUrl,
         colors: extractPalette(sample),
         filledAt: Date.now(),
       };
       slots[slot] = theme;
-      saveCustoms(slots);
+      const persisted = saveCustoms(slots);
       renderSlot(slot);
       applyCustomTheme(theme, slot);
+      if (!persisted) {
+        // 压到阶梯最低档仍塞不下：本格现在能用，但刷新后会丢，明确告诉用户而不是静默失败
+        toast("第 " + (slot + 1) + " 格图片已自动压到最小，但仍超出浏览器存储配额：本次可用，重启后会丢失。可先清掉几格再重传，或换张更小的图。");
+      }
       resolve(theme.colors);
     };
     img.onerror = () => reject(new Error("图片读取失败"));

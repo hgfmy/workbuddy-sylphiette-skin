@@ -98,7 +98,7 @@ Apply with `node src/cli.mjs apply --theme <id>`; afterwards the user switches f
 the in-app 🎨 menu, which is grouped as **自定义 / 薄纱浓度 / 背景取景**:
 
 - **自定义** — installed themes **and** uploaded images share the same slots
-  (**4** by default). Slot `i` resolves in this order: the user's uploaded image →
+  (**10** by default). Slot `i` resolves in this order: the user's uploaded image →
   installed theme #i (unless hidden) → empty upload entry. So the first installed
   theme occupies slot 0, and it behaves like any other slot: uploading an image
   there pushes it out, `×` clears it.
@@ -112,7 +112,14 @@ the in-app 🎨 menu, which is grouped as **自定义 / 薄纱浓度 / 背景取
     for installed themes. Legacy layouts migrate on load: a 3-element array shifts
     right by one, a single object / `workbuddyCustomTheme` lands in slot 1.
   - Only the active slot's CSS is materialized, so slot count does not grow the
-    injection payload.
+    injection payload. It does grow `localStorage` usage, though: the per-slot
+    budget is `STORAGE_BUDGET_CHARS / customSlots` (≈420K chars each at 10 slots),
+    and an upload that would exceed it is auto-down-converted through
+    `ENCODE_LADDER` (1600/q0.82 → 640/q0.62, first rung that fits). Ordinary
+    images stay on the first rung, i.e. identical quality to before. If even the
+    last rung does not fit, the slot still works for the session and the menu
+    shows a red toast saying it will be lost on restart — it is never a silent
+    failure.
 - **薄纱浓度** — five live presets for how opaque the white veils over the
   artwork are (`清透 17% / 较透 27% / 标准 38% / 较实 51% / 浓实 65%` on the
   sidebar). Switching is pure CSS, no re-injection.
@@ -125,8 +132,8 @@ Preset values live in `VEIL_BASE` / `VEIL_PRESETS` / `FRAMING_PRESETS` in
 property so presets can re-declare the `#root` background without repeating the
 base64 payload — keep that property when adding new presets. The slot count comes
 from `customSlots` in the `buildSkinMenuScript` payload (`src/skin-menu.mjs`).
-Slot `i` is pre-assigned to installed theme #i, so the default 4 means "first
-installed theme + 3 blank slots"; raise it there and the storage array / slot rows
+Slot `i` is pre-assigned to installed theme #i, so the default 10 means "first
+installed theme + 9 blank slots"; raise it there and the storage array / slot rows
 follow.
 
 - List available themes: `node src/cli.mjs list`.
