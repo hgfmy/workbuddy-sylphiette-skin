@@ -431,6 +431,15 @@ renderer hint `renderer/index.html`.
   saturation + S-curve). Runs inside Blender, so it needs no Pillow/sharp:
   `blender.exe -b --factory-startup -P scripts/enhance-hero.py -- <src> <dst> [strength] [contrast] [saturation] [scurve]`
 - `scripts/find-workbuddy.mjs` — detection diagnostic.
+- `scripts/node-env.cmd` — resolves a Node runtime for the `.cmd` launchers.
+  **Never pin the bundled Node version.** WorkBuddy installs its Node under
+  `%USERPROFILE%\.workbuddy\binaries\node\versions\<ver>\` and `<ver>` changes on
+  every update (observed `22.22.2-3` → `22.22.2-6`). A launcher with the old path
+  hardcoded fails instantly with "the system cannot find the path specified",
+  which looks like a broken skin but is really a missing Node. `node-env.cmd`
+  checks PATH first, then takes the newest bundled copy (`dir /b /ad /o-n`).
+  Launchers call it as `call "%ROOT%\scripts\node-env.cmd" || (pause & exit /b 1)`.
+  Re-run this check after every WorkBuddy upgrade.
 - `scripts/generate-hero.mjs`, `scripts/png-to-webp.mjs` — theme asset helpers.
 - `themes/` — 10 built-in theme folders (`theme.json` + `hero.webp`).
 - `README.md` — full human-readable documentation.

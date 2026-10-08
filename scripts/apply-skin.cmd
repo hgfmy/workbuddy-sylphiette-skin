@@ -1,9 +1,12 @@
 @echo off
 setlocal
-set "NODE=%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node.exe"
 set "ROOT=%USERPROFILE%\.workbuddy\skills\workbuddy-skin-studio"
 set "LOG=%ROOT%\apply.log"
 set "THEME=sylphiette-91f4818e"
+
+rem Do not pin the bundled Node version: WorkBuddy swaps
+rem ~\.workbuddy\binaries\node\versions\<ver> on every update.
+call "%ROOT%\scripts\node-env.cmd" || (pause & exit /b 1)
 
 echo ============================================================
 echo   WorkBuddy Skin Apply - Sylphiette

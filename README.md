@@ -111,11 +111,13 @@ WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网�
 
    复制完成后，该目录下应能直接看到 `src`、`scripts`、`themes`、`package.json`。希露菲主题随 `engine/themes/` 一起装好，不需要单独操作。
 
-3. **配置一键脚本**：`scripts/` 下的 4 个 `.cmd` 顶部各有一个变量块，按你的环境核对：
+3. **配置一键脚本**：通常无需改动。`scripts/` 下的 4 个 `.cmd` 顶部各有一个变量块：
 
-   - `NODE` —— WorkBuddy 内置 node.exe（形如 `%USERPROFILE%\.workbuddy\binaries\node\versions\<版本号>\node.exe`，版本号以你机器实际为准）
-   - `ROOT` —— 第 2 步的安装目录
-   - `EXE` —— WorkBuddy 主程序路径（仅还原脚本用到）
+   - `ROOT` —— 第 2 步的安装目录（默认 `%USERPROFILE%\.workbuddy\skills\workbuddy-skin-studio`）
+   - `EXE` —— WorkBuddy 主程序路径（仅还原脚本用到，默认 `D:\Workbuddy\WorkBuddy.exe`）
+   - ~~`NODE`~~ —— **已取消写死**。Node 由 `engine/scripts/node-env.cmd` 运行时解析：先查 PATH，再取 `%USERPROFILE%\.workbuddy\binaries\node\versions\` 下**版本号最新**的那一份。
+
+     > 这一步是 v1.2.0 的必修项。WorkBuddy 每次更新都会换掉内置 Node 的目录名（实测 `22.22.2-3` → `22.22.2-6`），写死版本的脚本会在双击后直接报「系统找不到指定的路径」，看上去像皮肤坏了，其实是 Node 不见了。
 
 4. **应用皮肤**：双击 `scripts/apply-skin.cmd`，WorkBuddy 会以调试模式重启并注入皮肤（约 20-40 秒）。想要「以后每次打开自动带皮肤」，双击 `scripts/enable-auto-skin.cmd` 装一次常驻守护进程即可。
 
@@ -124,7 +126,9 @@ WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网�
 ## 踩坑记录
 
 - **注入成功但界面不变**：几乎都是新增的不透明白底层在遮挡，需要重新定位并透明化。
+- **双击脚本一闪而过 / 报「找不到路径」**：Node 路径写死了版本号，而 WorkBuddy 更新换掉了内置 Node 目录。现已由 `engine/scripts/node-env.cmd` 在运行时解析，不再需要手改。
 - **调输入框透明度无反应**：元凶是模糊滤镜把淡色线稿糊成了纯白，不是透明度的锅。
+- **输入框上方一片白雾**：5.7.x 新增的 `[class*=input-area-container]::before` 渐隐带（72px 高、向上溢出 48px），已在该伪元素作用域内透明化。
 - **输入框能看到的底图有限**：输入框固定在视口底部，底图铺满视口时，它永远只能露出图片最底部那一小条。想让那一带有内容，只能换图或重新拼一张底图。
 - **菜单出现重复条目**：旧主题行未清理干净，需要定位后删除重复渲染。
 - **沙箱限制**：环境内无法直接杀掉并重启 WorkBuddy（会连带终止自身进程），因此「启用自动皮肤」这一步必须由用户手动双击脚本完成。
