@@ -192,25 +192,45 @@ body[data-application-name=workbuddy] {
 
   /* 顶部 30px 拿不到 #root 的底图，所以 body 上也挂一份，两层用同一个 fixed 定位自动对齐 */
   background: var(--wb-hero) center center / var(--wb-hero-size) no-repeat fixed !important;
+
+  /* 5.7.x 新增：整壳背景图 token。默认 none，但一旦被主题/活动换上，
+     它会画在 .teams-container 上盖住底图 —— 这里钉死为 none。 */
+  --wb-home-bg-image: none !important;
 }
 
-/* 关键：teams-container 是 #root 直接子层，默认有不透明灰底，会完全盖住背景图 */
+/* 关键：teams-container 是 #root 直接子层，默认有不透明灰底，会完全盖住背景图。
+   5.6.x 是硬编码 rgb(255,255,255)；5.7.x 改为 background-color:var(--wb-home-bg-primary)
+   （.teams-container.is-mac 里为 #f2f2f2），外加 background-image:var(--wb-home-bg-image)。
+   注意：不要图省事去改 --wb-home-bg-* 这两个 token —— 它们是全局变量，还会被
+   .cfp-type-dropdown__menu、.cfp-card、.skill-picker-panel 这类必须不透明的浮层复用，
+   置空会让下拉菜单和卡片变透明、文字糊在底图上。逐层覆盖背景才是安全的。 */
 .teams-container,
 .teams-container.is-mac {
   background: transparent !important;
+  background-image: none !important;
 }
 
-/* 所有 grid 项容器透明，让 #root 背景图大面积透出 */
+/* 所有 grid 项容器透明，让 #root 背景图大面积透出。
+   5.7.x 里 .teams-container [data-view-id=sidebar] 用 --wb-home-bg-primary、
+   .teams-container [data-view-id]:not([data-view-id=sidebar]) 用 --wb-home-bg-secondary，
+   两条都是非 !important 规则，会被下面这条盖掉。 */
 [data-view-id] {
   background: transparent !important;
 }
 
 /* 内容区内的子层也透明（否则会盖住背景图和薄纱层）
    注：.workbuddy-topbar 默认有不透明 rgb(20,20,20) 硬底 + 1px solid rgb(242,242,242) 底边，
-   会挡住主内容区顶栏的底图并产生一条白线 */
+   会挡住主内容区顶栏的底图并产生一条白线。
+   5.7.x 新增 .main-content--chat / .main-content--initializing / .main-content--genie
+   三个变体，它们同样用 --wb-home-bg-secondary 铺满整屏（含 .workbuddy-topbar.ec-topbar），
+   必须一并列进来，否则对话页会退回一整块白。 */
 .conversation-list,
 .main-content,
 .main-content--welcome,
+.main-content--chat,
+.main-content--initializing,
+.main-content--genie,
+.main-content-panel-shell,
 .sidebar-next,
 .workbuddy-topbar,
 .workbuddy-topbar::before,
@@ -219,7 +239,7 @@ body[data-application-name=workbuddy] {
   border-bottom: 0 !important;
 }
 
-/* 实测 WorkBuddy 5.6.2 新增/改名的遮罩层：
+/* 实测遮罩层。5.6.2 起新增了一批铺满全屏的不透明层：
    .teams-grid-scroll-content 是 #root 的直接子层，默认纯白硬底 rgb(255,255,255)，
    会整块盖住 #root 的底图；conversation-shell / detail-panel / detail-main__body
    同为不透明白底，一并透明化。
@@ -228,11 +248,29 @@ body[data-application-name=workbuddy] {
    它后面的 [data-view-id=sidebar] / main-content 规则会重新给各自面板上色。
 
    .wb-home-route 是「新建任务」页（WorkBuddy, 我帮你）的 <main> 根容器，
-   默认纯白硬底 rgb(255,255,255) 铺满 1443x989，把底图整块盖死。
-   它是独立路由视图，和对话页不共用容器，所以必须单独列出来。 */
+   默认纯白硬底铺满 1443x989，把底图整块盖死。
+   它是独立路由视图，和对话页不共用容器，所以必须单独列出来。
+
+   ── 5.7.x 的变化 ──
+   5.7.x 把上面这些硬编码白底统一收敛成了 --wb-home-bg-secondary
+   （.teams-container.is-mac 内为 #fff），容器名基本沿用了下来，但新增了
+   若干独立路由页的根容器，它们各自铺满全屏、互不共用：
+     .claw-agent-chat-pane  智能体对话
+     .atm-detail-page       自动化详情
+     .project-detail-view   项目详情（含 __top-tabs / __input-area--project）
+     .skills-view           技能页
+     .skill-market          技能市场
+     .connector-panel       连接器面板
+     .discover-panel-page   发现页
+     .expert-center-page    专家中心
+     .kb-onboarding-panel   知识库引导
+     .workspace-preparing   工作区准备中
+     .welcome               欢迎页
+   下面这份名单同时覆盖 5.6.x / 5.7.x 两代。 */
 .teams-grid-scroll-content,
 [class*="gridView"],
 .conversation-shell,
+.conversation-route,
 .detail-panel,
 .detail-main__body,
 .detail-layout,
@@ -240,8 +278,34 @@ body[data-application-name=workbuddy] {
 .sources-panel,
 .conversation-section-label,
 .wb-home-route,
-[class*="wb-home-route"] {
+[class*="wb-home-route"],
+.wb-home-page,
+.claw-agent-chat-pane,
+.atm-detail-page,
+.project-detail-view,
+.project-detail-view__input-area--project,
+.skills-view,
+.skill-market,
+.connector-panel,
+.discover-panel-page,
+.expert-center-page,
+.kb-onboarding-panel,
+.workspace-preparing,
+.welcome {
   background: transparent !important;
+}
+
+/* 5.7.x 新增：输入框顶部那道 72px 的渐隐白带。
+   选择器是 CSS-module 哈希类名 [class*=input-area-container]::before，
+   底色同样来自 --wb-home-bg-secondary，且 top:-48px、左右各内缩 16px ——
+   它会从 composer 顶边向上溢出 48px，正好压在底图正中偏下，
+   是「输入框上方浮出一片白雾」的新来源。
+   这里只在这个伪元素作用域内把 token 置空（不影响 .cfp-* 等浮层），
+   再显式清掉 background，双保险。 */
+[class*=input-area-container]::before {
+  --wb-home-bg-secondary: transparent;
+  --cb-colleagues-prompt-bg: transparent;
+  background: none !important;
 }
 
 ${buildVeilCss(1)}

@@ -1,6 +1,6 @@
 ---
 name: workbuddy-skin-studio
-version: "1.0.1"
+version: "1.1.0"
 display_name: "WorkBuddy换肤"
 display_name_en: "WorkBuddy Skin Studio"
 description_zh: "给 WorkBuddy 桌面应用换主题皮肤：通过本地 Chrome DevTools Protocol (CDP) 注入 CSS 主题，可逆，不修改 app.asar。"
@@ -302,16 +302,71 @@ click and switch back the same way:
 centre instead. Always record the selected conversation title first and click it
 back afterwards; verify with a final screenshot that you really returned.
 
-### Opaque layers observed in WorkBuddy 5.6.x
+### Opaque layers observed in WorkBuddy 5.6.x / 5.7.x
+
+**5.7.x refactor (important):** 5.7 unified every shell background onto two design
+tokens defined on `.teams-container.is-mac`:
+
+```css
+.teams-container.is-mac { --wb-home-bg-primary:#f2f2f2; --wb-home-bg-secondary:#fff }
+.teams-container        { background-color: var(--wb-home-bg-primary);
+                          background-image: var(--wb-home-bg-image,none) }
+.teams-container [data-view-id=sidebar]                    { background: var(--wb-home-bg-primary) }
+.teams-container [data-view-id]:not([data-view-id=sidebar]) { background: var(--wb-home-bg-secondary) }
+.main-content           { background: var(--wb-home-bg-secondary) }
+.main-content--chat, .main-content--chat .workbuddy-topbar, .main-content--initializing
+                        { background: var(--wb-home-bg-secondary) }
+.wb-home-route          { background: var(--wb-home-bg-secondary) }
+.teams-grid-scroll-content { background: var(--wb-home-bg-secondary) }
+.conversation-shell     { background: var(--wb-home-bg-secondary,#fafafa) }
+```
+
+**Do not neutralise `--wb-home-bg-primary/secondary` globally.** They are reused
+by floating UI that must stay opaque — `.cfp-type-dropdown__menu`,
+`.cfp-upload-dropdown__menu`, `.cfp-card`, `.skill-picker-panel`,
+`.document-upload-dock`, `.sb-share-bar`. Blanking the tokens makes those
+dropdowns and cards transparent and their text unreadable over the artwork.
+Override `background` per container instead. (Scoping the override to a single
+pseudo-element is fine and is exactly what the composer fade fix does.)
+
+New full-page root containers in 5.7.x, none of which share a container with the
+conversation view, so each needs its own entry: `.claw-agent-chat-pane`,
+`.atm-detail-page`, `.project-detail-view` (+ `__top-tabs` /
+`__input-area--project`), `.skills-view`, `.skill-market`, `.connector-panel`,
+`.discover-panel-page`, `.expert-center-page`, `.kb-onboarding-panel`,
+`.workspace-preparing`, `.welcome`.
+
+Also new in 5.7.x: the composer's top fade —
+
+```css
+[class*=input-area-container]::before {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--wb-home-bg-secondary) 0%, transparent) 0%,
+                                       var(--wb-home-bg-secondary) 100%);
+  height: 72px; top: -48px; left: 16px; right: 16px;
+}
+```
+
+It bleeds 48px *above* the composer, straight over the middle of the artwork, and
+reads as "a white haze floating over the input box". The class is a CSS-module
+hash, so target it as `[class*=input-area-container]::before`.
 
 | Selector | Default | Note |
 | --- | --- | --- |
-| `.teams-grid-scroll-content` | `rgb(255,255,255)` | direct child of `#root`, full-screen — the usual culprit |
-| `[class*="gridView"]` (e.g. `_gridView_xxxxx_9`) | `--cb-panel-bg-primary` (88% white) | full-screen wash |
-| `.conversation-shell`, `.detail-panel`, `.detail-main__body`, `.detail-layout` | white | |
-| `.wb-home-route` | `rgb(255,255,255)` | the **new-task / home route** (`WorkBuddy, 我帮你`) — its own `<main>`, full screen; not shared with the conversation view, so it needs its own rule |
-| `.cr-input-container` | `rgb(255,255,255)`, `border-radius: 24px` | the composer — the **only** opaque layer in the whole input stack |
-| `.cr-input-toolbar__right` | white | invisible against the white composer, becomes a stray white band once the composer is transparent |
+| `.teams-container` | `var(--wb-home-bg-primary)` since 5.7.x | direct child of `#root`, full-screen (was hardcoded `rgb(255,255,255)`) |
+| `.teams-container [data-view-id=sidebar]` | `var(--wb-home-bg-primary)` | sidebar wash |
+| `.teams-container [data-view-id]:not([data-view-id=sidebar])` | `var(--wb-home-bg-secondary)` | main/detail wash; both `data-view-id` rules are non-`!important`, so a `!important` override wins |
+| `.teams-grid-scroll-content` | `var(--wb-home-bg-secondary)` | direct child of `#root`, full-screen — the usual culprit |
+| `[class*="gridView"]` (e.g. `_gridView_11lon_9`) | `--cb-panel-bg-primary` | full-screen wash |
+| `.conversation-shell`, `.detail-panel`, `.detail-main__body`, `.detail-layout` | `var(--wb-home-bg-secondary)` | |
+| `.main-content`, `.main-content--chat`, `.main-content--initializing` | `var(--wb-home-bg-secondary)` | the `--chat` / `--initializing` variants are new in 5.7.x |
+| `.wb-home-route` | `var(--wb-home-bg-secondary)` | the **new-task / home route** (`WorkBuddy, 我帮你`) — its own `<main>`, full screen; not shared with the conversation view, so it needs its own rule |
+| `[class*=input-area-container]::before` | `--wb-home-bg-secondary` gradient | **new in 5.7.x** — 72px band starting 48px above the composer |
+| `.cr-input-container` | `var(--cr-bg-elevated)`, `border-radius: 24px` | the composer — the **only** opaque layer in the whole input stack |
+| `.cr-input-toolbar__right` | `var(--cr-bg-elevated)` | invisible against the opaque composer, becomes a stray white band once the composer is transparent |
+
+`_gridView_11lon_9` in 5.7.x still resolves through `[class*="gridView"]`, and the
+three `data-view-id` values are unchanged (`sidebar`, `main-content`,
+`detail-panel`) — the 5.6.x probe recipe and the view-switching clicks still apply.
 
 `#workbuddy-menubar-container` (30px tall, `rgb(242,242,242)`) sits **above**
 `#root`: `#root`'s rect starts at `y=30`, so the top 30px is outside its box and

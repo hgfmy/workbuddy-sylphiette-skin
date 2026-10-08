@@ -4,7 +4,7 @@
 
 > 引擎、主题、一键脚本全部随仓库分发。clone 下来按「安装与使用」三步即可在自己电脑上跑起来，零 npm 依赖。
 
-> 完成时间：2026-10-02　|　环境：WorkBuddy 5.6.2 / Windows　|　主题 ID：`sylphiette-91f4818e`
+> 完成时间：2026-10-02　|　最近升级：2026-10-08　|　环境：WorkBuddy **5.7.6** / Windows（兼容 5.6.x）　|　主题 ID：`sylphiette-91f4818e`　|　皮肤引擎 v1.2.0
 
 ## 最终效果
 
@@ -33,6 +33,28 @@
 ### 穿透 5.6.2 的多层白底
 
 WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网格滚动容器、「新建任务」首页路由视图、会话外壳、详情面板等。不把它们逐一透明化，就会出现「注入成功但界面毫无变化」的现象。定位方法是按目标区域坐标遍历元素，筛选出不透明背景、有边框或阴影的层。
+
+### 适配 WorkBuddy 5.7.x（引擎 v1.2.0 / 2026-10-08）
+
+5.7.x 把原来散落各处的硬编码白底**统一收敛到两个设计 token**上，定义在 `.teams-container.is-mac`：
+
+```css
+.teams-container.is-mac { --wb-home-bg-primary:#f2f2f2; --wb-home-bg-secondary:#fff }
+.teams-container { background-color: var(--wb-home-bg-primary);
+                   background-image: var(--wb-home-bg-image,none) }
+.main-content    { background: var(--wb-home-bg-secondary) }
+.wb-home-route   { background: var(--wb-home-bg-secondary) }
+```
+
+**关键判断：不能图省事直接把这俩 token 全局置空。** 它们同时被必须保持不透明的浮层复用——`.cfp-type-dropdown__menu`、`.cfp-upload-dropdown__menu`、`.cfp-card`、`.skill-picker-panel`、`.document-upload-dock`、`.sb-share-bar`。置空会让下拉菜单和卡片一起变透明，文字直接糊在底图上。正确做法是**逐容器覆盖 `background`**。
+
+本次升级做了三件事：
+
+1. **补上 5.7.x 新增的整屏路由页根容器**：`.claw-agent-chat-pane`、`.atm-detail-page`、`.project-detail-view`、`.skills-view`、`.skill-market`、`.connector-panel`、`.discover-panel-page`、`.expert-center-page`、`.kb-onboarding-panel`、`.workspace-preparing`、`.welcome`，以及对话页的三个新变体 `.main-content--chat / --initializing / --genie`。它们各自铺满全屏、互不共用容器，漏一个就等于那页「没换肤」。
+2. **修掉输入框上方新出现的白雾**。5.7.x 新增了一条 72px 高的渐隐带 `[class*=input-area-container]::before`，`top:-48px` 从 composer 顶边向上溢出，正好压在底图正中偏下——表现为「输入框上方浮出一片白雾」。选择器是 CSS-module 哈希类名，只能按 `[class*=input-area-container]` 匹配；在该伪元素作用域内把 token 与背景一并清掉。
+3. **`doctor` 现在会报告 WorkBuddy 版本**，用于确认皮肤规则是否对得上当前安装版本（`appVersion` / `skinEngine` / `supportedSeries`）。
+
+另外：5.7.x 里 `.teams-container [data-view-id=…]` 的两条上色规则都**不带** `!important`，所以既有的 `!important` 透明化规则依然能压住它们；三个 `data-view-id` 取值（`sidebar` / `main-content` / `detail-panel`）与 5.6.x 完全一致，DOM 探测脚本无需改动。
 
 ### 顶部 30px 菜单栏
 

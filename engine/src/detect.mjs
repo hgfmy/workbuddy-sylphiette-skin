@@ -3,9 +3,9 @@
 // strategies, preferring the running process so non-standard install dirs work.
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const isWin = platform() === "win32";
 
@@ -71,4 +71,41 @@ export function findAppMac(argApp) {
 // Unified entry: returns the platform-appropriate WorkBuddy path, or null.
 export function findWorkBuddy({ exe, app } = {}) {
   return isWin ? findExeWindows(exe) : findAppMac(app);
+}
+
+// Read the installed WorkBuddy version so callers can tell which skin layer set
+// applies. Windows ships `<install>/resources/install-manifest.json` (appVersion)
+// plus a bare `<install>/version` file; macOS uses the bundle's Info.plist.
+export function readWorkBuddyVersion(appPath) {
+  if (!appPath) return null;
+  const root = isWin ? dirname(appPath) : appPath;
+
+  const manifest = join(root, "resources", "install-manifest.json");
+  if (existsSync(manifest)) {
+    try {
+      const parsed = JSON.parse(readFileSync(manifest, "utf8"));
+      if (parsed?.appVersion) return String(parsed.appVersion);
+    } catch {
+      // fall through to the plain version file
+    }
+  }
+
+  const plain = join(root, "version");
+  if (existsSync(plain)) {
+    try {
+      const v = readFileSync(plain, "utf8").trim();
+      if (v) return v;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!isWin) {
+    const plist = join(root, "Contents", "Info.plist");
+    if (existsSync(plist)) {
+      const v = quietExec("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", plist]).trim();
+      if (v) return v;
+    }
+  }
+  return null;
 }

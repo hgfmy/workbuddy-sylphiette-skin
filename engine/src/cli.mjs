@@ -2,11 +2,11 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { DEFAULT_CDP_PORT, DEFAULT_THEME_ID, EXPECTED_BUNDLE_ID, RENDERER_URL_HINT, resolveStudioPaths } from "./constants.mjs";
+import { DEFAULT_CDP_PORT, DEFAULT_THEME_ID, EXPECTED_BUNDLE_ID, RENDERER_URL_HINT, SKIN_ENGINE_VERSION, SUPPORTED_WORKBUDDY_SERIES, resolveStudioPaths } from "./constants.mjs";
 import { applySkin, removeSkin, skinStatus } from "./injector.mjs";
 import { loadTheme } from "./theme-schema.mjs";
 import { createSingleImageTheme, listThemes } from "./theme-store.mjs";
-import { findWorkBuddy } from "./detect.mjs";
+import { findWorkBuddy, readWorkBuddyVersion } from "./detect.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -99,6 +99,9 @@ export async function runCli(argv, overrides = {}) {
         platform: "win32",
         app,
         appFound: !!app,
+        appVersion: readWorkBuddyVersion(app),
+        skinEngine: SKIN_ENGINE_VERSION,
+        supportedSeries: SUPPORTED_WORKBUDDY_SERIES,
         candidates,
         cdpPort: DEFAULT_CDP_PORT,
         rendererHint: RENDERER_URL_HINT,
@@ -110,6 +113,9 @@ export async function runCli(argv, overrides = {}) {
       platform: "darwin",
       app,
       appFound: !!app,
+      appVersion: readWorkBuddyVersion(app),
+      skinEngine: SKIN_ENGINE_VERSION,
+      supportedSeries: SUPPORTED_WORKBUDDY_SERIES,
       bundleId: EXPECTED_BUNDLE_ID,
       cdpPort: DEFAULT_CDP_PORT,
       rendererHint: RENDERER_URL_HINT,
