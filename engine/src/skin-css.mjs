@@ -266,7 +266,28 @@ body[data-application-name=workbuddy] {
      .kb-onboarding-panel   知识库引导
      .workspace-preparing   工作区准备中
      .welcome               欢迎页
-   下面这份名单同时覆盖 5.6.x / 5.7.x 两代。 */
+
+   ── 5.7.7 的新增（2026-10-10 复测）──
+   5.7.7 没有推翻 token 方案：.teams-container.is-mac 上仍是
+   --wb-home-bg-primary:#f2f2f2 / --wb-home-bg-secondary:#fff，上面这批容器名
+   也全部沿用（另新增 :root 兜底同一组值）。但多出一批同样吃 secondary 的
+   容器与「雾化伪元素」，静态取证自 app.asar（126 个 CSS / 7.85MB）逐条核对：
+     .wb-home-cloud-header   首页「云」顶栏（背景 secondary + 一条 border-bottom）
+     .wb-home-mobile-header  移动端首页顶栏（桌面不渲染，一并列上）
+     .workspace-preparing--worktree  工作区准备中（worktree 变体）
+     .project-detail-view__top-tabs                    项目详情顶栏页签
+     .project-detail-view--task-detail                 任务详情变体根
+     .project-detail-view--task-detail .project-detail-view__left  其左栏（flex:1 大面）
+     .lexiang-library-iframe-view__iframe / __placeholder / __loading-overlay /
+     __skeleton                    乐享知识库 iframe 视图（占位层是 inset:0 全屏）
+     .tencent-lexiang-panel--iframe  乐享面板外壳
+     .claw-workspace__tab-error      工作区 tab 的错误页（width/height:100%）
+     .wb-skill-rec-bar               5.7.7 新增的技能推荐条（32px，贴在 composer 附近）
+     .wb-share-bar                   会话底部发布/分享条（absolute;bottom:0;min-height:120px）
+     另有四个 CSS-module 哈希类（._wrap_zzafx_1 / ._section_1fi36_1 /
+     ._section_14m5u_1 / ._page_18ay2_7）同样吃 secondary，但类名带构建哈希、
+     每次发版都可能变，硬编码必然失效 —— 刻意不写，等它们稳定成具名类再加。
+   下面这份名单同时覆盖 5.6.x / 5.7.x / 5.7.7。 */
 .teams-grid-scroll-content,
 [class*="gridView"],
 .conversation-shell,
@@ -289,21 +310,58 @@ body[data-application-name=workbuddy] {
 .connector-panel,
 .discover-panel-page,
 .expert-center-page,
-.kb-onboarding-panel,
-.workspace-preparing,
-.welcome {
+  .kb-onboarding-panel,
+  .workspace-preparing,
+  .workspace-preparing--worktree,
+  .welcome,
+  /* ── 5.7.7 新增的整屏 / 大面容器 ── */
+  .wb-home-cloud-header,
+  .wb-home-mobile-header,
+  .project-detail-view__top-tabs,
+  .project-detail-view--task-detail,
+  .project-detail-view--task-detail .project-detail-view__left,
+  .lexiang-library-iframe-view,
+  .lexiang-library-iframe-view__iframe,
+  .lexiang-library-iframe-view__iframe-container,
+  .lexiang-library-iframe-view__placeholder,
+  .lexiang-library-iframe-view__loading-overlay,
+  .lexiang-library-iframe-view__skeleton,
+  .tencent-lexiang-panel--iframe,
+  .claw-workspace__tab-error,
+  .wb-skill-rec-bar {
   background: transparent !important;
 }
 
-/* 5.7.x 新增：输入框顶部那道 72px 的渐隐白带。
-   选择器是 CSS-module 哈希类名 [class*=input-area-container]::before，
-   底色同样来自 --wb-home-bg-secondary，且 top:-48px、左右各内缩 16px ——
-   它会从 composer 顶边向上溢出 48px，正好压在底图正中偏下，
-   是「输入框上方浮出一片白雾」的新来源。
-   这里只在这个伪元素作用域内把 token 置空（不影响 .cfp-* 等浮层），
-   再显式清掉 background，双保险。 */
-[class*=input-area-container]::before {
+/* 5.7.7：会话底部发布/分享条（.wb-share-bar）是全宽 absolute 条
+   （bottom:0; left/right:0; min-height:120px），默认 secondary 实底。
+   它不在任何带薄纱的面板内，且内部有渠道图标与文本，完全透明会糊；
+   给一层偏实的白纱（88%），既透出底图又保住内容可读。 */
+.wb-share-bar {
+  background: color-mix(in srgb, var(--wb-surface) 88%, transparent) !important;
+}
+
+/* 5.7.x / 5.7.7 新增：一批「雾化伪元素」—— 底色同样来自 --wb-home-bg-secondary，
+   但画在伪元素上、常常还向上/向外溢出，肉眼就是一片凭空浮出的白雾。
+     [class*=input-area-container]::before      输入框上方 72px（top:-48px）
+     .wb-skill-rec-bar::before                  技能推荐条上方 32px（top:-32px）
+     .wb-skill-rec-bar__chips-wrap--fade-*:*    推荐条 chip 的左右渐隐
+     .claw-welcome-header__apps-row2-wrap:after 欢迎页第二行应用的底部渐隐
+     .sm-scroll-list--horizontal/vertical:*     技能市场滚动区的四向渐隐（48px）
+     .team-member-bar-slot::before              团队成员栏的顶部渐隐（仅 dark 变体生效）
+   全部在伪元素作用域内把 token 置空，再显式清掉 background，双保险。
+   （作用域仅限该伪元素，不会波及 .cfp-* / .skill-picker-panel 这些浮层。） */
+[class*=input-area-container]::before,
+.wb-skill-rec-bar::before,
+.wb-skill-rec-bar__chips-wrap--fade-right::after,
+.wb-skill-rec-bar__chips-wrap--fade-left::before,
+.claw-welcome-header__apps-row2-wrap::after,
+.sm-scroll-list--horizontal::before,
+.sm-scroll-list--horizontal::after,
+.sm-scroll-list--vertical::before,
+.sm-scroll-list--vertical::after,
+.team-member-bar-slot::before {
   --wb-home-bg-secondary: transparent;
+  --sm-scroll-list-fade-color: transparent;
   --cb-colleagues-prompt-bg: transparent;
   background: none !important;
 }

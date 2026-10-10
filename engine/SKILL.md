@@ -1,6 +1,6 @@
 ---
 name: workbuddy-skin-studio
-version: "1.1.0"
+version: "1.2.1"
 display_name: "WorkBuddy换肤"
 display_name_en: "WorkBuddy Skin Studio"
 description_zh: "给 WorkBuddy 桌面应用换主题皮肤：通过本地 Chrome DevTools Protocol (CDP) 注入 CSS 主题，可逆，不修改 app.asar。"
@@ -302,7 +302,7 @@ click and switch back the same way:
 centre instead. Always record the selected conversation title first and click it
 back afterwards; verify with a final screenshot that you really returned.
 
-### Opaque layers observed in WorkBuddy 5.6.x / 5.7.x
+### Opaque layers observed in WorkBuddy 5.6.x / 5.7.x / 5.7.7
 
 **5.7.x refactor (important):** 5.7 unified every shell background onto two design
 tokens defined on `.teams-container.is-mac`:
@@ -335,6 +335,54 @@ conversation view, so each needs its own entry: `.claw-agent-chat-pane`,
 `__input-area--project`), `.skills-view`, `.skill-market`, `.connector-panel`,
 `.discover-panel-page`, `.expert-center-page`, `.kb-onboarding-panel`,
 `.workspace-preparing`, `.welcome`.
+
+**5.7.7 (verified 2026-10-10):** the token scheme is unchanged — `.teams-container.is-mac`
+still defines `--wb-home-bg-primary:#f2f2f2` / `--wb-home-bg-secondary:#fff` (now also
+mirrored on `:root`), and every 5.7.x container above is still present. What's new is a
+second wave of `secondary`-fed containers plus a family of *fog pseudo-elements*:
+
+| Selector | Note |
+| --- | --- |
+| `.wb-home-cloud-header` | home page cloud header — `secondary` fill + one `border-bottom` |
+| `.wb-home-mobile-header` | mobile home header (not rendered on desktop; listed for completeness) |
+| `.workspace-preparing--worktree` | worktree variant of the preparing screen |
+| `.project-detail-view__top-tabs` | project-detail tab bar |
+| `.project-detail-view--task-detail` | task-detail variant root |
+| `.project-detail-view--task-detail .project-detail-view__left` | its left pane (`flex:1`, large area) |
+| `.lexiang-library-iframe-view__iframe` / `__iframe-container` / `__placeholder` / `__loading-overlay` / `__skeleton` | Lexiang KB iframe view; the placeholder/overlay/skeleton are `position:absolute; inset:0` full-screen |
+| `.tencent-lexiang-panel--iframe` | Lexiang panel shell |
+| `.claw-workspace__tab-error` | workspace tab error page (`width/height:100%`) |
+| `.wb-skill-rec-bar` | **new** skill-recommendation bar, 32px, sits by the composer |
+| `.wb-share-bar` | **new** publish/share bar — `position:absolute; bottom:0; left/right:0; min-height:120px`. Give it a *veil* (skin-css uses 88%), not full transparency: it carries channel icons and text and is not inside any veiled panel |
+
+Fog pseudo-elements (same trick as the composer fade — blank the token inside the
+pseudo's own scope, then clear `background`): `.wb-skill-rec-bar::before`
+(32px band, `top:-32px`), `.wb-skill-rec-bar__chips-wrap--fade-right::after` /
+`--fade-left::before`, `.claw-welcome-header__apps-row2-wrap::after` (24px bottom
+gradient), and `.sm-scroll-list--horizontal/vertical::before/::after` (48px fade
+masks in the skill market — they read `var(--sm-scroll-list-fade-color, var(--wb-home-bg-secondary))`,
+so blanking either token works).
+
+Four CSS-module hashed classes (`. _wrap_zzafx_1`, `._section_1fi36_1`,
+`._section_14m5u_1`, `._page_18ay2_7`) also consume `secondary`, but the hash changes
+every build — deliberately **not** hardcoded. Add them only if they stabilise into
+named classes.
+
+Static re-verification recipe (when the CDP port is closed): unpack `app.asar` with
+Node — header length is `readUInt32LE(12)`, the data area starts at `16 + len` — walk
+the tree, concatenate `renderer/**/*.css` (~126 files / ~7.9MB) and grep for
+`var(--wb-home-bg-secondary` to get the authoritative consumer list in one pass. This
+is packaged as a one-shot command — run it after **every** WorkBuddy upgrade:
+
+```bash
+node scripts/probe-asar.mjs          # human-readable report
+node scripts/probe-asar.mjs --json   # machine-readable
+```
+
+It prints the token definitions, every consumer, and the exact **差集** — i.e. the
+selectors that consume the token but are *not* yet covered by `src/skin-css.mjs`.
+A clean run ends with `✔ 没有发现未覆盖的具名容器`. It also separates "must stay
+opaque" floating UI from hashed CSS-module classes, so you don't add the wrong thing.
 
 Also new in 5.7.x: the composer's top fade —
 
@@ -431,6 +479,11 @@ renderer hint `renderer/index.html`.
   saturation + S-curve). Runs inside Blender, so it needs no Pillow/sharp:
   `blender.exe -b --factory-startup -P scripts/enhance-hero.py -- <src> <dst> [strength] [contrast] [saturation] [scurve]`
 - `scripts/find-workbuddy.mjs` — detection diagnostic.
+- `scripts/probe-asar.mjs` — **static DOM forensics without a CDP port.** Unpacks
+  `resources/app.asar` in memory, concatenates `renderer/**/*.css`, and reports every
+  consumer of `--wb-home-bg-primary/secondary` minus the classes already covered by
+  `src/skin-css.mjs`. Run it after every WorkBuddy upgrade; it tells you exactly what
+  to add. Zero dependencies, needs no restart, no debug port.
 - `scripts/node-env.cmd` — resolves a Node runtime for the `.cmd` launchers.
   **Never pin the bundled Node version.** WorkBuddy installs its Node under
   `%USERPROFILE%\.workbuddy\binaries\node\versions\<ver>\` and `<ver>` changes on

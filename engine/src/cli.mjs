@@ -2,7 +2,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { DEFAULT_CDP_PORT, DEFAULT_THEME_ID, EXPECTED_BUNDLE_ID, RENDERER_URL_HINT, SKIN_ENGINE_VERSION, SUPPORTED_WORKBUDDY_SERIES, resolveStudioPaths } from "./constants.mjs";
+import { DEFAULT_CDP_PORT, DEFAULT_THEME_ID, EXPECTED_BUNDLE_ID, LAST_VERIFIED_WORKBUDDY, RENDERER_URL_HINT, SKIN_ENGINE_VERSION, SUPPORTED_WORKBUDDY_SERIES, resolveStudioPaths } from "./constants.mjs";
 import { applySkin, removeSkin, skinStatus } from "./injector.mjs";
 import { loadTheme } from "./theme-schema.mjs";
 import { createSingleImageTheme, listThemes } from "./theme-store.mjs";
@@ -102,6 +102,7 @@ export async function runCli(argv, overrides = {}) {
         appVersion: readWorkBuddyVersion(app),
         skinEngine: SKIN_ENGINE_VERSION,
         supportedSeries: SUPPORTED_WORKBUDDY_SERIES,
+        lastVerifiedWorkbuddy: LAST_VERIFIED_WORKBUDDY,
         candidates,
         cdpPort: DEFAULT_CDP_PORT,
         rendererHint: RENDERER_URL_HINT,
@@ -116,6 +117,7 @@ export async function runCli(argv, overrides = {}) {
       appVersion: readWorkBuddyVersion(app),
       skinEngine: SKIN_ENGINE_VERSION,
       supportedSeries: SUPPORTED_WORKBUDDY_SERIES,
+      lastVerifiedWorkbuddy: LAST_VERIFIED_WORKBUDDY,
       bundleId: EXPECTED_BUNDLE_ID,
       cdpPort: DEFAULT_CDP_PORT,
       rendererHint: RENDERER_URL_HINT,
