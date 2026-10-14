@@ -1,6 +1,6 @@
 ---
 name: workbuddy-skin-studio
-version: "1.2.1"
+version: "1.2.2"
 display_name: "WorkBuddy换肤"
 display_name_en: "WorkBuddy Skin Studio"
 description_zh: "给 WorkBuddy 桌面应用换主题皮肤：通过本地 Chrome DevTools Protocol (CDP) 注入 CSS 主题，可逆，不修改 app.asar。"
@@ -368,21 +368,57 @@ Four CSS-module hashed classes (`. _wrap_zzafx_1`, `._section_1fi36_1`,
 every build — deliberately **not** hardcoded. Add them only if they stabilise into
 named classes.
 
+**5.8.2 (verified 2026-10-14): no skin-CSS change required.** `appVersion`
+5.7.7 → 5.8.2, Electron `37.10.3-24` → `37.10.3-42`. The token scheme, all three
+`data-view-id` values, `.teams-container`, `.workbuddy-topbar`, `.cr-input*`,
+`.conversation-shell`, the whole 5.7.x container list **and**
+`#workbuddy-menubar-container` are all still there — the probe reports **0 uncovered
+consumers** and **26/26 anchors alive**.
+
+What *did* change is **packaging, and it silently breaks the old probe**: from 5.8.2
+the entire `renderer/**` tree is marked `unpacked` — the CSS no longer lives in the
+app.asar data area (`val.offset === undefined`) but in the sibling
+`app.asar.unpacked/renderer/…` directory. Reading by `offset` (the 5.7.x recipe)
+returns *misaligned bytes*, whose symptom is `token 消费方：0 个选择器` — a **false
+negative that looks exactly like "nothing to adapt"**. `scripts/probe-asar.mjs` now
+reads both layouts (`val.unpacked || val.offset === undefined` → load from the
+unpacked dir) and additionally performs anchor-survival and reverse dead-rule checks.
+
+- `--wb-home-bg-video` / `--wb-home-bg-image` are defined but have no named consumers.
+- Full-screen **opaque** candidates found this round were all *intentional* and are
+  **deliberately left alone** — do not add them to the transparency list:
+  `.industry-switch-loading` (`#ffffff1a` + `blur(96px)`), `.file-drop-overlay__mask`
+  (`#ffffffb3` + `blur(16px)`), `.stp-container` / `.stp-*-iframe` (code preview on
+  `--cb-vscode-*`, self-themed dark), `.html-preview__frame` / `.detail-main__preview-slot iframe`
+  (iframe content carriers — transparency inside an iframe is meaningless).
+- CSS-module hashes rolled this build (`._page_18ay2_7` → `._page_1yu3o_7` etc.) —
+  still correctly skipped.
+
 Static re-verification recipe (when the CDP port is closed): unpack `app.asar` with
 Node — header length is `readUInt32LE(12)`, the data area starts at `16 + len` — walk
-the tree, concatenate `renderer/**/*.css` (~126 files / ~7.9MB) and grep for
-`var(--wb-home-bg-secondary` to get the authoritative consumer list in one pass. This
-is packaged as a one-shot command — run it after **every** WorkBuddy upgrade:
+the tree, concatenate `renderer/**/*.css` (~143 files / ~7.7MB) and grep for
+`var(--wb-home-bg-secondary` to get the authoritative consumer list in one pass.
+**From 5.8.2 those files are `unpacked`, so read them from `app.asar.unpacked/` —
+only fall back to `offset` when `val.offset` is defined.** This is packaged as a
+one-shot command — run it after **every** WorkBuddy upgrade:
 
 ```bash
 node scripts/probe-asar.mjs          # human-readable report
 node scripts/probe-asar.mjs --json   # machine-readable
 ```
 
-It prints the token definitions, every consumer, and the exact **差集** — i.e. the
-selectors that consume the token but are *not* yet covered by `src/skin-css.mjs`.
-A clean run ends with `✔ 没有发现未覆盖的具名容器`. It also separates "must stay
-opaque" floating UI from hashed CSS-module classes, so you don't add the wrong thing.
+The report now carries **three** checks:
+
+1. **token consumers vs. `skin-css.mjs`** — the exact **差集**: selectors that
+   consume the token but are *not* yet covered. A clean run ends with
+   `✔ 没有发现未覆盖的具名容器`. It separates "must stay opaque" floating UI and
+   hashed CSS-module classes, so you don't add the wrong thing.
+2. **anchor survival** — are the 26 load-bearing selectors (`ANCHORS[]`) still
+   present? A selector defined only in JS (a DOM id like
+   `#workbuddy-menubar-container`) is reported as "JS-only, normal", not as missing.
+3. **reverse dead rules** — classes `skin-css.mjs` covers that no longer exist in the
+   new CSS (a container was renamed → the rule silently no-ops). Only kebab/BEM names
+   are listed; camelCase and bare words are filtered out as JS-key false positives.
 
 Also new in 5.7.x: the composer's top fade —
 
@@ -484,6 +520,11 @@ renderer hint `renderer/index.html`.
   consumer of `--wb-home-bg-primary/secondary` minus the classes already covered by
   `src/skin-css.mjs`. Run it after every WorkBuddy upgrade; it tells you exactly what
   to add. Zero dependencies, needs no restart, no debug port.
+  **Handles both packed and unpacked layouts** — since 5.8.2 the whole `renderer/**`
+  tree is `unpacked`, so it reads from `app.asar.unpacked/` whenever `val.offset` is
+  undefined (the old offset-only read yields a "0 consumers" false negative). Beyond
+  the token diff it also checks **anchor survival** (26 load-bearing selectors) and
+  **reverse dead rules** (covered classes that vanished from the new CSS).
 - `scripts/node-env.cmd` — resolves a Node runtime for the `.cmd` launchers.
   **Never pin the bundled Node version.** WorkBuddy installs its Node under
   `%USERPROFILE%\.workbuddy\binaries\node\versions\<ver>\` and `<ver>` changes on

@@ -1,11 +1,21 @@
 #!/usr/bin/env node
-// 静态取证：不开 CDP 端口也能查「新版 WorkBuddy 有没有新增需要透明化的容器」。
+// 静态取证：不开 CDP 端口也能查「新版 WorkBuddy 有没有需要重新适配的地方」。
 //
 // 原理：WorkBuddy 5.7.x 起把整壳背景统一收敛到两个设计 token ——
 //   .teams-container.is-mac { --wb-home-bg-primary:#f2f2f2; --wb-home-bg-secondary:#fff }
 // 所以「谁需要被皮肤透明化」= 「谁消费了 var(--wb-home-bg-secondary|primary)」。
 // 本脚本解开 app.asar 里 renderer/**/*.css，列出全部 token 定义与消费选择器，
 // 再拿 src/skin-css.mjs 里已覆盖的类名做差集 —— 打印出的就是待补清单。
+//
+// ⚠ WorkBuddy 5.8.2 起 renderer/** 资源整体转为 unpacked：CSS 真实内容不再位于
+//   app.asar 数据区，而在同级的 app.asar.unpacked/ 目录。旧版按 offset 读取会得到
+//   错位字节，表现为「token 消费方 0 个」的假阴性 —— 极易被误判成「无需适配」。
+//   本脚本已同时支持 packed / unpacked 两种布局（见下方 walk）。
+//
+// 体检项：
+//   1) token 定义与消费方                → 有没有新增需要透明化的具名容器
+//   2) 锚点存活（ANCHORS）               → 皮肤赖以生效的关键选择器是否还在
+//   3) 反向死规则                        → 皮肤覆盖的类名是否已被改名（静默失效）
 //
 // 用法：
 //   node scripts/probe-asar.mjs
@@ -42,6 +52,11 @@ if (!fs.existsSync(ASAR)) {
 }
 
 /* ── 1. 解析 asar ─────────────────────────────────────────────────────── */
+// 注意：WorkBuddy 5.8.2 起把 renderer/** 资源整体标记为 unpacked，
+// 真实内容不再位于 app.asar 数据区（val.offset === undefined），
+// 而是落在同级的 app.asar.unpacked/ 目录里。旧版按 offset 读取会
+// 读到错位字节（表现为「token 消费方 0 个」的假阴性）。这里两种都支持。
+const UNPACKED_ROOT = `${ASAR}.unpacked`;
 const buf = fs.readFileSync(ASAR);
 const jsonLen = buf.readUInt32LE(12);            // 头部 JSON 长度
 const header = JSON.parse(buf.toString("utf8", 16, 16 + jsonLen));
@@ -49,14 +64,26 @@ const dataStart = 16 + jsonLen;
 
 let css = "";
 let fileCount = 0;
+let unpackedCount = 0;
+const rendererCodePaths = [];   // renderer 下的 JS：锚点检查的回退检索目标
 (function walk(node, prefix) {
   for (const [name, val] of Object.entries(node.files || {})) {
     const p = `${prefix}/${name}`;
     if (val.files) { walk(val, p); continue; }
-    if (!/\.css$/i.test(name)) continue;
     if (!p.includes("/renderer/")) continue;
-    const s = dataStart + (val.offset >>> 0);
-    css += `\n/*===== ${p} =====*/\n` + buf.toString("utf8", s, s + (val.size >>> 0));
+    if (/\.(js|mjs|cjs)$/i.test(name)) { rendererCodePaths.push(path.join(UNPACKED_ROOT, p)); continue; }
+    if (!/\.css$/i.test(name)) continue;
+    let content;
+    if (val.unpacked || val.offset === undefined) {
+      const up = path.join(UNPACKED_ROOT, p);
+      if (!fs.existsSync(up)) continue;
+      content = fs.readFileSync(up, "utf8");
+      unpackedCount += 1;
+    } else {
+      const s = dataStart + (val.offset >>> 0);
+      content = buf.toString("utf8", s, s + (val.size >>> 0));
+    }
+    css += `\n/*===== ${p} =====*/\n` + content;
     fileCount += 1;
   }
 })(header, "");
@@ -68,10 +95,11 @@ let m;
 while ((m = markRe.exec(css))) marks.push({ idx: m.index, file: m[1] });
 const srcOf = (i) => { let n = "?"; for (const mk of marks) if (mk.idx <= i) n = mk.file; return n; };
 
-const TOKEN = /var\(--wb-home-bg-(secondary|primary)/;
+const TOKEN = /var\(--wb-home-bg-(primary|secondary|image|video)/;
+const TOKEN_GROUP = "(primary|secondary|image|video)";
 
 const definitions = [];
-const defRe = /([^{}]{0,300})\{[^{}]*?--wb-home-bg-(primary|secondary)\s*:\s*([^;{}]+)/g;
+const defRe = new RegExp(`([^{}]{0,300})\\{[^{}]*?--wb-home-bg-${TOKEN_GROUP}\\s*:\\s*([^;{}]+)`, "g");
 while ((m = defRe.exec(css))) {
   definitions.push({
     token: m[2],
@@ -82,7 +110,7 @@ while ((m = defRe.exec(css))) {
 }
 
 const consumers = new Map(); // selector -> token
-const useRe = /([^{}]{0,300})\{([^{}]*?var\(--wb-home-bg-(secondary|primary)[^{}]*)\}/g;
+const useRe = new RegExp(`([^{}]{0,300})\\{([^{}]*?var\\(--wb-home-bg-${TOKEN_GROUP}[^{}]*)\\}`, "g");
 while ((m = useRe.exec(css))) {
   const token = m[3];
   for (const raw of m[1].split(",")) {
@@ -118,14 +146,57 @@ for (const [sel, meta] of consumers) {
   missing.push({ sel, missing: target.filter((c) => !covered.has(c)), ...meta });
 }
 
-/* ── 4. 报告 ──────────────────────────────────────────────────────────── */
+/* ── 4. 锚点存活 + 反向死规则 ────────────────────────────────────────────
+   光看「token 消费方是否已覆盖」不够：如果某个容器被改名，旧的透明化规则
+   会静默变成死规则，而新名字的容器可能直接露白。这里双向校验：
+     · 正向：皮肤赖以生效的关键选择器是否仍在新版 CSS 里；
+     · 反向：皮肤覆盖的类名是否已从新版 CSS 中消失（疑似改名）。 */
+const ANCHORS = [
+  ".teams-container", ".teams-grid-scroll-content", ".conversation-shell",
+  "[data-view-id=sidebar]", "[data-view-id=main-content]", "[data-view-id=detail-panel]",
+  ".wb-home-route", ".wb-home-cloud-header", ".wb-home-mobile-header",
+  ".workspace-preparing", ".project-detail-view", ".skills-view", ".skill-market",
+  ".connector-panel", ".discover-panel-page", ".expert-center-page", ".kb-onboarding-panel",
+  ".claw-agent-chat-pane", ".atm-detail-page", ".wb-skill-rec-bar", ".wb-share-bar",
+  ".workbuddy-topbar", ".cr-input", "#workbuddy-menubar-container",
+  "lexiang-library-iframe-view", "tencent-lexiang-panel",
+];
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// 锚点可能只由 JS 动态创建（如 #workbuddy-menubar-container 只在 main-*.js 里出现），
+// 因此 CSS 未命中时回退到 renderer 的 JS 文本里再找一次，避免误报「已消失」。
+const anchorsDead = [];
+const anchorsJsOnly = [];
+for (const a of ANCHORS) {
+  if ((css.match(new RegExp(escapeRe(a), "g")) || []).length > 0) continue;
+  let inJs = false;
+  for (const fp of rendererCodePaths) {
+    if (!fs.existsSync(fp)) continue;
+    if (fs.readFileSync(fp, "utf8").includes(a)) { inJs = true; break; }
+  }
+  if (inJs) anchorsJsOnly.push(a);
+  else anchorsDead.push(a);
+}
+
+// 反向死规则：皮肤覆盖的类名若在新版 CSS 中已不存在，说明容器可能被改名（死规则）。
+// 过滤掉驼峰（JS 变量误匹配）、无分隔符的通用英文词（surface/brand/entries…多为皮肤内部键名）、
+// 过短类名与皮肤自建前缀；保留 kebab-case / BEM 风格（WorkBuddy 组件类名的实际形态）。
+const deadRules = [...covered].filter((c) => {
+  if (/[A-Z]/.test(c)) return false;
+  if (!/[-_]/.test(c)) return false;
+  if (c.length < 5) return false;
+  if (/^(wb-skin|workbuddy-skin|skill-|json-)/i.test(c)) return false;
+  return !new RegExp("\\." + escapeRe(c) + "\\b").test(css);
+}).sort();
+
+/* ── 5. 报告 ──────────────────────────────────────────────────────────── */
 if (args.json) {
-  process.stdout.write(JSON.stringify({ definitions, missing, opaqueKept, hashedSkipped }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ definitions, missing, opaqueKept, hashedSkipped, anchorsDead, deadRules }, null, 2) + "\n");
   process.exit(0);
 }
 
 console.log(`app.asar      : ${ASAR}`);
-console.log(`renderer CSS  : ${fileCount} 个文件 / ${(css.length / 1048576).toFixed(2)} MB`);
+console.log(`renderer CSS  : ${fileCount} 个文件 / ${(css.length / 1048576).toFixed(2)} MB` +
+  (unpackedCount ? `（其中 ${unpackedCount} 个为 unpacked 外部文件）` : ""));
 console.log(`已核对皮肤文件: ${SKIN_CSS}`);
 console.log(`已覆盖类名    : ${covered.size} 个\n`);
 
@@ -153,4 +224,23 @@ if (hashedSkipped.length) {
 if (opaqueKept.length) {
   console.log("\n── 复用 token 但必须保持不透明（别加进透明化名单）──");
   for (const x of opaqueKept.slice(0, 20)) console.log(`  ${x.sel}`);
+}
+
+console.log(`\n── 锚点存活：${ANCHORS.length - anchorsDead.length}/${ANCHORS.length} ──`);
+if (anchorsDead.length) {
+  console.log("  ✘ 完全消失（CSS 与 JS 中均未找到；对应适配大概率失效，需人工跟进）：");
+  for (const a of anchorsDead) console.log(`     ${a}`);
+} else {
+  console.log("  ✔ 全部关键锚点健在。");
+}
+if (anchorsJsOnly.length) {
+  console.log(`  注：${anchorsJsOnly.length} 个仅在 JS 中定义（DOM id / 动态类名，正常）：${anchorsJsOnly.join(", ")}`);
+}
+
+console.log("\n── 反向死规则（皮肤覆盖但新版 CSS 中已不存在，疑似改名）──");
+if (deadRules.length) {
+  console.log("  以下类名请人工确认是否被改名（若为 JS 侧类名则可忽略）：");
+  for (const c of deadRules) console.log(`  .${c}`);
+} else {
+  console.log("  ✔ 无。");
 }

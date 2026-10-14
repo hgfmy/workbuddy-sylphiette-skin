@@ -4,7 +4,7 @@
 
 > 引擎、主题、一键脚本全部随仓库分发。clone 下来按「安装与使用」三步即可在自己电脑上跑起来，零 npm 依赖。
 
-> 完成时间：2026-10-02　|　最近升级：2026-10-08　|　环境：WorkBuddy **5.7.6** / Windows（兼容 5.6.x）　|　主题 ID：`sylphiette-91f4818e`　|　皮肤引擎 v1.2.0
+> 完成时间：2026-10-02　|　最近升级：2026-10-14　|　环境：WorkBuddy **5.8.2** / Windows（兼容 5.6.x）　|　主题 ID：`sylphiette-91f4818e`　|　皮肤引擎 v1.2.2
 
 ## 最终效果
 
@@ -55,6 +55,14 @@ WorkBuddy 5.6.2 起新增了多个铺满全屏的不透明白底层，包括网�
 3. **`doctor` 现在会报告 WorkBuddy 版本**，用于确认皮肤规则是否对得上当前安装版本（`appVersion` / `skinEngine` / `supportedSeries`）。
 
 另外：5.7.x 里 `.teams-container [data-view-id=…]` 的两条上色规则都**不带** `!important`，所以既有的 `!important` 透明化规则依然能压住它们；三个 `data-view-id` 取值（`sidebar` / `main-content` / `detail-panel`）与 5.6.x 完全一致，DOM 探测脚本无需改动。
+
+### 适配 WorkBuddy 5.8.2（引擎 v1.2.2 / 2026-10-14）
+
+**本次无需改动任何皮肤 CSS。** 5.7.7 → 5.8.2（Electron `37.10.3-24` → `37.10.3-42`）延续了 5.7.x 的 token 方案：`.teams-container.is-mac` 仍定义 `--wb-home-bg-primary/secondary`，三个 `data-view-id` 取值、`.teams-container`、`.workbuddy-topbar`、`.cr-input*`、`#workbuddy-menubar-container` 以及 5.7.x 全部容器名都健在。静态体检结论：**待补具名容器 0 个、关键锚点 26/26 存活**。
+
+真正变化的是**打包方式，而且它会静默破坏旧的取证脚本**：5.8.2 起整个 `renderer/**` 目录被标记为 `unpacked` —— CSS 不再位于 `app.asar` 数据区（`val.offset` 为 `undefined`），而是落在同级的 `app.asar.unpacked/renderer/…`。沿用旧版「按 offset 读取」会得到**错位字节**，症状是打印出「token 消费方 0 个选择器」——一个**看起来像「无需适配」的假阴性**。`scripts/probe-asar.mjs` 现已同时支持两种布局，并新增**锚点存活**与**反向死规则**两项体检。
+
+本轮排查过的「整屏不透明白底」候选，均确认为**设计上有意为之，未加入透明化名单**：`.industry-switch-loading`（`#ffffff1a` + `blur(96px)`）、`.file-drop-overlay__mask`（`#ffffffb3` + `blur(16px)`）、`.stp-*` 代码预览（走 `--cb-vscode-*`，自成暗色主题）、`.html-preview__frame` 等 iframe 内容载体（iframe 内部透明无意义）。
 
 ### 顶部 30px 菜单栏
 
